@@ -140,6 +140,31 @@ func dockerSetup(t *testing.T, task *drivers.TaskConfig) (*docker.Client, *dtest
 	}
 }
 
+// cleanSlate removes the specified docker image, including potentially stopping/removing any
+// containers based on that image. This is used to decouple tests that would be coupled
+// by using the same container image.
+func cleanSlate(client *docker.Client, imageID string) {
+	if img, _ := client.InspectImage(imageID); img == nil {
+		return
+	}
+	containers, _ := client.ListContainers(docker.ListContainersOptions{
+		All: true,
+		Filters: map[string][]string{
+			"ancestor": {imageID},
+		},
+	})
+	for _, c := range containers {
+		client.RemoveContainer(docker.RemoveContainerOptions{
+			Force: true,
+			ID:    c.ID,
+		})
+	}
+	client.RemoveImageExtended(imageID, docker.RemoveImageOptions{
+		Force: true,
+	})
+	return
+}
+
 // dockerDriverHarness wires up everything needed to launch a task with a docker driver.
 // A driver plugin interface and cleanup function is returned
 func dockerDriverHarness(t *testing.T, cfg map[string]interface{}) *dtestutil.DriverHarness {
@@ -1428,8 +1453,7 @@ func TestDockerDriver_EnableImageGC(t *testing.T) {
 	cleanup := driver.MkAllocDir(task, true)
 	defer cleanup()
 
-	// remove the image before the test
-	client.RemoveImage(cfg.Image)
+	cleanSlate(client, cfg.Image)
 
 	copyImage(t, task.TaskDir(), "busybox.tar")
 	_, _, err := driver.StartTask(task)
@@ -1494,8 +1518,7 @@ func TestDockerDriver_DisableImageGC(t *testing.T) {
 	cleanup := driver.MkAllocDir(task, true)
 	defer cleanup()
 
-	// remove the image before the test
-	client.RemoveImage(cfg.Image)
+	cleanSlate(client, cfg.Image)
 
 	copyImage(t, task.TaskDir(), "busybox.tar")
 	_, _, err := driver.StartTask(task)
